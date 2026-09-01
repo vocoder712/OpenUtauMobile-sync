@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using OpenUtau.Core.Ustx;
 using OpenUtau.Core.Format;
+using OpenUtau.Core.DiffSinger;
 
 namespace OpenUtau.Core.Editing {
     public class AddTailNote : BatchEdit {
@@ -478,39 +479,42 @@ namespace OpenUtau.Core.Editing {
             var commands = new List<SetCurveCommand>();
             for (int ph_i = phrases.Count() - 1; ph_i >= 0; ph_i--) {
                 var phrase = phrases[ph_i];
-                var result = renderer.LoadRenderedPitch(phrase);
+                var result = renderer.LoadRenderedPitch(phrase, positions);
                 if (result == null) {
                     continue;
                 }
-                int? lastX = null;
-                int? lastY = null;
                 // TODO: Optimize interpolation and command.
                 if (cancellationToken.IsCancellationRequested) break;
                 // Take the first negative tick before start and the first tick after end for each segment;
                 // Reverse traversal, so that when the score slices are too close, priority is given to covering the consonant pitch of the next segment, reducing the impact on vowels.
-                for (int i = 0; i < result.tones.Length; i++) {
-                    if (result.tones[i] < 0) {
-                        continue;
-                    }
-                    int x = phrase.position - part.position + (int)result.ticks[i];
-                    if (result.ticks[i] < 0) {
-                        if (i + 1 < result.ticks.Length && result.ticks[i + 1] > 0) { } else
+                foreach (var (start, end) in DiffSingerRetake.GetRetakeFrameRanges(
+                    result.retakeMask, result.tones.Length)) {
+                    int? lastX = null;
+                    int? lastY = null;
+                    for (int i = start; i < end; i++) {
+                        if (result.tones[i] < 0) {
                             continue;
+                        }
+                        int x = phrase.position - part.position + (int)result.ticks[i];
+                        if (result.ticks[i] < 0) {
+                            if (i + 1 < result.ticks.Length && result.ticks[i + 1] > 0) { } else
+                                continue;
+                        }
+                        if (x >= phrase.position + phrase.duration) {
+                            i = end - 1;
+                        }
+                        int pitchIndex = Math.Clamp((x - (phrase.position - part.position - phrase.leading)) / 5, 0, phrase.pitches.Length - 1);
+                        float basePitch = phrase.pitchesBeforeDeviation[pitchIndex];
+                        int y = (int)(result.tones[i] * 100 - basePitch);
+                        lastX ??= x;
+                        lastY ??= y;
+                        if (y > minPitD) {
+                            commands.Add(new SetCurveCommand(
+                                project, part, Format.Ustx.PITD, x, y, lastX.Value, lastY.Value));
+                        }
+                        lastX = x;
+                        lastY = y;
                     }
-                    if (x >= phrase.position + phrase.duration) {
-                        i = result.tones.Length - 1;
-                    }
-                    int pitchIndex = Math.Clamp((x - (phrase.position - part.position - phrase.leading)) / 5, 0, phrase.pitches.Length - 1);
-                    float basePitch = phrase.pitchesBeforeDeviation[pitchIndex];
-                    int y = (int)(result.tones[i] * 100 - basePitch);
-                    lastX ??= x;
-                    lastY ??= y;
-                    if (y > minPitD) {
-                        commands.Add(new SetCurveCommand(
-                            project, part, Format.Ustx.PITD, x, y, lastX.Value, lastY.Value));
-                    }
-                    lastX = x;
-                    lastY = y;
                 }
                 finished += 1;
                 setProgressCallback(finished, phrases.Length);
