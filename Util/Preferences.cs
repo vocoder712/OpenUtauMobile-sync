@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using OpenUtau.Core.Render;
@@ -111,6 +112,11 @@ namespace OpenUtau.Core.Util {
 
                     if (!ValidString(new Action(() => CultureInfo.GetCultureInfo(Default.Language)))) Default.Language = string.Empty;
                     if (!ValidString(new Action(() => CultureInfo.GetCultureInfo(Default.SortingOrder)))) Default.SortingOrder = string.Empty;
+                    if (Default.Beta) {
+                        Default.Channel = "beta";
+                        Default.Beta = false;
+                    }
+                    if (!new[] { "stable", "beta", "alpha" }.Contains(Default.Channel)) Default.Channel = "stable";
                     if (!Renderers.getRendererOptions().Contains(Default.DefaultRenderer)) Default.DefaultRenderer = string.Empty;
                     if (!Onnx.getRunnerOptions().Contains(Default.OnnxRunner)) Default.OnnxRunner = string.Empty;
                     if (Default.Theme != null) {
@@ -219,7 +225,11 @@ namespace OpenUtau.Core.Util {
             public int OtoEditor = 0;
             public string VLabelerPath = string.Empty;
             public string SetParamPath = string.Empty;
-            public bool Beta = false;
+            public bool Beta = false; // deprecated, migrated to Channel
+            /// <summary>
+            /// Release channel for the auto updater: "stable", "beta" or "alpha".
+            /// </summary>
+            public string Channel = "stable";
             public bool RememberMid = false;
             public bool RememberUst = true;
             public bool RememberVsqx = true;
