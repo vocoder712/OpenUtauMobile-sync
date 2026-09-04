@@ -211,6 +211,25 @@ namespace OpenUtau.Core.Render {
         internal readonly IRenderer renderer;
         public readonly string wavtool;
 
+        /// <summary>
+        /// The [startMs, endMs) range (absolute ms) of the rendered phrase
+        /// audio, including the leading pre-utter and the release tail,
+        /// matching the WaveSource layout used by the mix.
+        /// </summary>
+        public (double StartMs, double EndMs) AudioRange {
+            get {
+                try {
+                    var layout = renderer.Layout(this);
+                    double startMs = layout.positionMs - layout.leadingMs;
+                    return (startMs, startMs + layout.estimatedLengthMs);
+                } catch {
+                    // Layout can fail when the singer is not usable; fall back
+                    // to the phoneme span.
+                    return (positionMs, endMs);
+                }
+            }
+        }
+
         private List<string> cacheFiles = new List<string>();
 
         internal RenderPhrase(UProject project, UTrack track, UVoicePart part, IEnumerable<UPhoneme> phonemes) {
