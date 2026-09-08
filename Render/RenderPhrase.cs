@@ -231,19 +231,7 @@ namespace OpenUtau.Core.Render {
         /// audio, including the leading pre-utter and the release tail,
         /// matching the slot layout used by the mix.
         /// </summary>
-        public (double StartMs, double EndMs) AudioRange {
-            get {
-                try {
-                    var layout = renderer.Layout(this);
-                    double startMs = layout.positionMs - layout.leadingMs;
-                    return (startMs, startMs + layout.estimatedLengthMs);
-                } catch {
-                    // Layout can fail when the singer is not usable; fall back
-                    // to the phoneme span.
-                    return (positionMs, endMs);
-                }
-            }
-        }
+        public readonly PhraseLayout Layout;
 
         private List<string> cacheFiles = new List<string>();
 
@@ -532,6 +520,16 @@ namespace OpenUtau.Core.Render {
             this.curves = curves.ToArray();
             preEffectHash = Hash(false);
             hash = Hash(true);
+
+            try {
+                var layout = renderer.Layout(this);
+                double startMs = layout.positionMs - layout.leadingMs;
+                Layout = new PhraseLayout(startMs, startMs + layout.estimatedLengthMs, layout.leadingMs, layout.estimatedLengthMs);
+            } catch {
+                // Layout can fail when the singer is not usable; fall back
+                // to the phoneme span.
+                Layout = new PhraseLayout(positionMs, endMs, 0, endMs - positionMs);
+            }
         }
 
         private static float[] SampleCurve(UCurve curve, int start, int length, Func<float, UCurve, float> convert) {

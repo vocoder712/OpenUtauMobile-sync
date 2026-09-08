@@ -229,6 +229,14 @@ namespace OpenUtau.Core {
             }
         }
 
+        // Every validate path: rebuild derived data, release unused singers,
+        // mark the render projections stale.
+        private void ValidateAndRefresh() {
+            Project.ValidateFull();
+            SingerManager.Inst.ReleaseSingersNotInUse(Project);
+            RenderView.Inst.InvalidateAll();
+        }
+
         public void ExecuteCmd(UCommand cmd) {
             if (CommandSink != null) {
                 CommandSink(cmd);
@@ -263,6 +271,7 @@ namespace OpenUtau.Core {
                     rangeStartTick = 0;
                     rangeEndTick = 0;
                     SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                    RenderView.Inst.ForgetAll();
                     DiffSingerRealCurveScheduler.CancelAll();
                 } else if (cmd is SetPlayPosTickNotification setPlayPosTickNotif) {
                     playPosTick = setPlayPosTickNotif.playPosTick;
@@ -281,17 +290,19 @@ namespace OpenUtau.Core {
                     SingerManager.Inst.SearchAllSingers();
                     SingerManager.Inst.ReleaseSingersNotInUse(Project);
                 } else if (cmd is ValidateProjectNotification) {
-                    Project.ValidateFull();
-                    SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                    ValidateAndRefresh();
                 } else if (cmd is SingersRefreshedNotification || cmd is OtoChangedNotification) {
                     foreach (var track in Project.tracks) {
                         track.OnSingerRefreshed();
                     }
-                    Project.ValidateFull();
-                    SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                    ValidateAndRefresh();
                     if (cmd is OtoChangedNotification) {
                         ExecuteCmd(new PreRenderNotification());
                     }
+                }
+                if (cmd is WaveformReadyNotification) {
+                    RenderView.Inst.InvalidateAll();
+                    return;
                 }
                 Publish(cmd);
                 if (!cmd.Silent) {
@@ -359,8 +370,7 @@ namespace OpenUtau.Core {
                 undoQueue.RemoveFromFront();
             }
             if (undoGroup.DeferValidate) {
-                Project.ValidateFull();
-                SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                ValidateAndRefresh();
             }
             undoGroup.Merge();
             ScheduleRealCurveRefresh(undoGroup.Commands);
@@ -405,8 +415,7 @@ namespace OpenUtau.Core {
                 var cmd = undoGroup.Commands[i];
                 cmd.Unexecute();
                 if (i == 0) {
-                    Project.ValidateFull();
-                    SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                    ValidateAndRefresh();
                 }
                 Publish(cmd, true);
             }
@@ -424,8 +433,7 @@ namespace OpenUtau.Core {
                 var cmd = group.Commands[i];
                 cmd.Unexecute();
                 if (i == 0) {
-                    Project.ValidateFull();
-                    SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                    ValidateAndRefresh();
                 }
                 Publish(cmd, true);
             }
@@ -443,8 +451,7 @@ namespace OpenUtau.Core {
                 var cmd = group.Commands[i];
                 cmd.Execute();
                 if (i == group.Commands.Count - 1) {
-                    Project.ValidateFull();
-                    SingerManager.Inst.ReleaseSingersNotInUse(Project);
+                    ValidateAndRefresh();
                 }
                 Publish(cmd);
             }
