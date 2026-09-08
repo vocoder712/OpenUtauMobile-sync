@@ -236,7 +236,6 @@ namespace OpenUtau.Core {
     }
 
     public class PlaybackManager : SingletonBase<PlaybackManager>, ICmdSubscriber {
-        public bool IsWaveformBlanked { get; set; } = false;
         private PlaybackManager() {
             DocManager.Inst.AddSubscriber(this);
             try {
@@ -462,8 +461,6 @@ namespace OpenUtau.Core {
         private void Render(UProject project, int tick, int endTick, int trackNo) {
             Task.Run(() => {
                 try {
-                    IsWaveformBlanked = false;
-                    
                     Task.Factory.StartNew(() => {
                         DocManager.Inst.ExecuteCmd(new WaveformReadyNotification());
                     }, CancellationToken.None, TaskCreationOptions.None, DocManager.Inst.MainScheduler);
