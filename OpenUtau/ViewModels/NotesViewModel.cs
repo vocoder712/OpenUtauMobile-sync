@@ -33,7 +33,6 @@ namespace OpenUtau.App.ViewModels {
             tempSelectedNotes = selection.TempSelectedNotes.ToArray();
         }
     }
-    public class WaveformRefreshEvent { }
 
     public partial class NotesViewModel : ViewModelBase, ICmdSubscriber {
         [Reactive] public partial Rect Bounds { get; set; }
@@ -1029,10 +1028,8 @@ namespace OpenUtau.App.ViewModels {
                         phrase.notes.Any(rnote => rnote.position == Part.position + note.position - phrase.position 
                                             && rnote.duration == note.duration)))
                     .ToList();
-                foreach (var phrase in phrases) {
-                    PlaybackManager.Inst.LiveWaveformCache.TryRemove(phrase.hash.ToString(), out _);
-                }
-                Part.Mix = null;
+                // The slot registry's per-part cache and session slots go back to pending.
+                PlaybackManager.Inst.MixPlanner.EvictPart(Part);
                 DocManager.Inst.ExecuteCmd(new WaveformReadyNotification());
                 Task.Run(() => {
                     foreach (var phrase in phrases) {
@@ -1186,8 +1183,6 @@ namespace OpenUtau.App.ViewModels {
                     OnPartModified();
                     RebuildPlaybackNoteIndex();
                     MessageBus.Current.SendMessage(new NotesRefreshEvent());
-                } else if (notif is PartRenderedNotification && notif.part == Part) {
-                    MessageBus.Current.SendMessage(new WaveformRefreshEvent());
                 } else if (notif is RealCurvesUpdatedNotification && notif.part == Part) {
                     MessageBus.Current.SendMessage(new RealCurveRefreshEvent());
                 } else if (notif is RealCurveCoverageNotification && notif.part == Part) {
