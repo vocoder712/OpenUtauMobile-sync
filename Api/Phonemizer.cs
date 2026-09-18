@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using OpenUtau.Core;
 using OpenUtau.Core.Ustx;
+using Serilog;
 
 namespace OpenUtau.Api {
     /// <summary>
@@ -275,35 +276,64 @@ namespace OpenUtau.Api {
         }
 
         public int GetParentToneShift() {
-            if (project != null && track != null) {
-                if (track.TryGetExpDescriptor(project, Core.Format.Ustx.SHFT, out var trackTS)) {
+            if (project == null || track == null) {
+                return 0;
+            }
+            try {
+                if (track.TryGetExpDescriptor(project, Core.Format.Ustx.SHFT, out var trackTS) && trackTS != null) {
                     return (int)trackTS.CustomDefaultValue;
                 }
+            } catch (Exception ex) {
+                Log.Error(ex, "Failed to resolve track Tone Shift (SHFT) descriptor for track {TrackName} ({TrackNo}).", 
+                    track.TrackName, track.TrackNo);
+                throw;
             }
             return 0;
         }
 
         public int? GetParentAlternate() {
-            if (project != null && track != null) {
-                if (track.TryGetExpDescriptor(project, Core.Format.Ustx.ALT, out var trackAlt)) {
+            if (project == null || track == null) {
+                return null;
+            }
+            try {
+                if (track.TryGetExpDescriptor(project, Core.Format.Ustx.ALT, out var trackAlt) && trackAlt != null) {
                     if (trackAlt.CustomDefaultValue != 0) {
                         return (int)trackAlt.CustomDefaultValue;
                     }
                 }
+            } catch (Exception ex) {
+                Log.Error(ex, "Failed to resolve track Alternate (ALT) descriptor for track {TrackName} ({TrackNo}).", 
+                    track.TrackName, track.TrackNo);
+                throw;
             }
             return null;
         }
 
         public string GetParentVoiceColor() {
-            if (project != null && track != null) {
-                if (track.TryGetExpDescriptor(project, Core.Format.Ustx.CLR, out var trackCLR)) {
-                    int index = (int)trackCLR.CustomDefaultValue;
-                    if (index >= 0 && index < trackCLR.options.Length) {
-                        return trackCLR.options[index];
-                    }
-                }
+            if (project == null || track == null) {
+                return string.Empty;
             }
-            return string.Empty;
+            try {
+                if (!track.TryGetExpDescriptor(project, Core.Format.Ustx.CLR, out var trackCLR) || trackCLR == null) {
+                    return string.Empty;
+                }
+                int index = (int)trackCLR.CustomDefaultValue;
+                if (track.VoiceColorExp == null || track.VoiceColorExp.options == null) {
+                    Log.Warning("Track {TrackName} ({TrackNo}) defines CLR expression index {ColorIndex}, but VoiceColorExp options are null or uninitialized.",
+                        track.TrackName, track.TrackNo, index);
+                    return string.Empty;
+                }
+                if (index < 0 || index >= track.VoiceColorExp.options.Length) {
+                    Log.Warning("Track {TrackName} ({TrackNo}) VoiceColor index {ColorIndex} is out of bounds (options count: {OptionCount}).",
+                        track.TrackName, track.TrackNo, index, track.VoiceColorExp.options.Length);
+                    return string.Empty;
+                }
+                return track.VoiceColorExp.options[index] ?? string.Empty;
+            } catch (Exception ex) {
+                Log.Error(ex, "Failed to resolve Voice Color (CLR) on track {TrackName} ({TrackNo}).", 
+                    track.TrackName, track.TrackNo);
+                throw;
+            }
         }
 
         /// <summary>
