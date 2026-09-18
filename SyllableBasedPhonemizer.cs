@@ -163,6 +163,9 @@ namespace OpenUtau.Plugin.Builtin {
 
         public override Result Process(Note[] notes, Note? prev, Note? next, Note? prevNeighbour, Note? nextNeighbour, Note[] prevNeighbours) {
             error = "";
+            if (singer == null || !singer.Loaded) {
+                return MakeSimpleResult("");
+            }
             var mainNote = notes[0];
             if (mainNote.lyric.StartsWith(FORCED_ALIAS_SYMBOL)) {
                 return MakeForcedAliasResult(mainNote);
@@ -200,8 +203,14 @@ namespace OpenUtau.Plugin.Builtin {
                 syllable.prevBasePhoneme = runningPrevBasePhoneme;
                 syllable.nextBasePhoneme = (i + 1 < syllables.Length) ? predictedBases[i + 1] : string.Empty;
 
-                var modifiedSyllable = ApplyBoundaryReplacements(syllable);
-                
+                bool isSlurNote = i < notes.Length && IsSyllableVowelExtensionNote(notes[i]);
+
+                // If it's a slur and the vowel is identical to the previous note, 
+                // bypass boundary replacements so YAML does not insert split consonants/glides!
+                var modifiedSyllable = (isSlurNote && syllable.prevV == syllable.v)
+                    ? syllable
+                    : ApplyBoundaryReplacements(syllable);
+
                 if (tails.Contains(modifiedSyllable.v)) {
                     var ending = new Ending {
                         prevV = modifiedSyllable.prevV,
@@ -254,14 +263,22 @@ namespace OpenUtau.Plugin.Builtin {
             int globalPhonemeIndex = 0;
 
             foreach (var bucket in syllablePhonemeBuckets) {
-            var madePhonemes = MakePhonemes(bucket.symbols, bucket.duration, bucket.position, bucket.isEnding, bucket.tone, workingAttributes.ToArray(), globalPhonemeIndex).ToList();
-            int currentSyllablePhonemeCount = bucket.symbols.Count;
+                var madePhonemes = MakePhonemes(
+                    bucket.symbols, 
+                    bucket.duration, 
+                    bucket.position, 
+                    bucket.isEnding, 
+                    bucket.tone, 
+                    workingAttributes.ToArray(), 
+                    globalPhonemeIndex
+                ).Where(p => p.phoneme != null).ToList();
+
+            int currentSyllablePhonemeCount = madePhonemes.Count;
 
             if (!bucket.isEnding && madePhonemes.Count > 0) {
                 var basePhoneme = madePhonemes.Last();
                 string baseAlias = basePhoneme.phoneme ?? "";
 
-                // Check exact alias match first, then fall back to the underlying vowel symbol
                 (string sustain, double offset) sustainData = default;
                 bool hasSustain = vowelSustains.TryGetValue(baseAlias, out sustainData)
                             || (!string.IsNullOrEmpty(bucket.vowel) && vowelSustains.TryGetValue(bucket.vowel, out sustainData));
@@ -279,9 +296,18 @@ namespace OpenUtau.Plugin.Builtin {
                     }
                 }
             }
-            phonemes.AddRange(madePhonemes);
-            globalPhonemeIndex += currentSyllablePhonemeCount;
-        }
+
+                phonemes.AddRange(madePhonemes);
+                // Only increment by phonemes that were ACTUALLY generated
+                globalPhonemeIndex += currentSyllablePhonemeCount;
+            }
+
+            // Re-index all phonemes sequentially so they align with the UI's 0, 1, 2...
+            for (int i = 0; i < phonemes.Count; i++) {
+                var p = phonemes[i];
+                p.index = i;
+                phonemes[i] = p;
+            }
 
             var phonemesArray = phonemes.ToArray();
             var finalPhonemes = AssignAllAffixes(phonemesArray.ToList(), notes, prevNeighbours, workingAttributes);
@@ -422,6 +448,7 @@ namespace OpenUtau.Plugin.Builtin {
             if (this.singer != singer) {
                 this.singer = singer;
                 dictionaries.Clear();
+                YamlCache.Clear();
 
                 if (this.singer == null || !this.singer.Loaded) {
                     return;
@@ -1129,6 +1156,7 @@ namespace OpenUtau.Plugin.Builtin {
         /// </summary>
         protected virtual string ValidateAlias(string alias, int tone = 0) {
             if (string.IsNullOrEmpty(alias)) return alias;
+            if (singer == null || !singer.Loaded) return alias;
             if (HasOto(alias, tone)) return alias;
 
             var singleRules = yamlFallbacks
@@ -1384,7 +1412,34 @@ namespace OpenUtau.Plugin.Builtin {
         /// <param name="tone"></param>
         /// <returns></returns>
         protected bool HasOto(string alias, int tone) {
-            return singer.TryGetMappedOto(alias, tone, out _);
+            var currentSinger = singer;
+            if (currentSinger == null || !currentSinger.Loaded || string.IsNullOrEmpty(alias)) {
+                return false;
+            }
+
+            try {
+                lock (currentSinger) {
+                    if (!currentSinger.Loaded) {
+                        return false;
+                    }
+                    if (currentSinger.TryGetMappedOto(alias, tone, out _)) {
+                        return true;
+                    }
+                    if (currentSinger.TryGetOto(alias, out _)) {
+                        return true;
+                    }
+                    if (currentSinger.TryGetMappedOto(alias, tone, "", out _)) {
+                        return true;
+                    }
+                }
+            } catch (InvalidOperationException ex) {
+                Log.Error(ex, $"Concurrency race detected in HasOto: singer '{currentSinger.Id}' was modified while querying alias '{alias}' at tone {tone}.");
+                throw;
+            } catch (KeyNotFoundException ex) {
+                Log.Error(ex, $"Dictionary corruption detected in HasOto: key traversal failed for alias '{alias}' at tone {tone}.");
+                throw;
+            }
+            return false;
         }
 
         /// <summary>
@@ -1858,21 +1913,15 @@ namespace OpenUtau.Plugin.Builtin {
 
         protected void ReadDictionaryAndInit() {
             var dictionaryName = GetDictionaryName();
-            if (dictionaryName == null) {
+            if (dictionaryName == null && string.IsNullOrEmpty(YamlFileName)) {
                 return;
             }
-            dictionaries[GetType()] = null;
-            if (Testing) {
+            try {
                 ReadDictionary(dictionaryName);
                 Init();
-                return;
+            } catch (Exception ex) {
+                Log.Error(ex, $"Failed to read dictionary {dictionaryName}");
             }
-            OnAsyncInitStarted();
-            Task.Run(() => {
-                ReadDictionary(dictionaryName);
-                Init();
-                OnAsyncInitFinished();
-            });
         }
 
         private void ReadDictionary(string dictionaryName) {
